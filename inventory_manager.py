@@ -1,5 +1,5 @@
 """
-Ibrahim Apparel & Trading - Inventory Manager v2
+Ibrahim Apparel & Trading - Inventory Manager v3
 Full Python practice project - with proper UI (Streamlit, no CLI)
 
 HOW TO RUN - Streamlit Community Cloud (free, no install):
@@ -8,28 +8,34 @@ HOW TO RUN - Streamlit Community Cloud (free, no install):
 3. Pick the repo, branch main, main file inventory_manager.py, Deploy
 4. Every push to GitHub auto-redeploys in 1-2 minutes
 
-WHAT'S NEW IN v2:
-- Demo data: 8 real Ibrahim products, Load / Clear in one tap
-- Sales history log: every sale is recorded with date, qty, amount, profit
-- Charts: stock value and profit by category
-- Edit product: change price, cost, stock, size after adding
-- CSV import: upload many products at once
-- Low-stock dashboard: all low items + how many to order
+WHAT'S NEW IN v3 (all v2 features kept):
+1. Barcode + Price Tag: CODE128 barcode per product, download a price-tag PNG
+2. Product Photos: upload a photo in Add / Edit, shown in Product Detail
+3. WhatsApp Order: link to wa.me/923275084710 with product details prefilled
+4. Supplier + Purchase Orders: supplier per product, create POs, Mark Received
+5. Monthly Sales Report + PDF: current month totals, best sellers, PDF download
+6. Discount / Sale Price: sale_price (0 = no sale), effective price used everywhere
 
 WHAT YOU LEARN:
 - lists & dictionaries, functions, file handling (CSV)
 - if/else, loops, sorting, filtering, groupby with pandas
 - Streamlit UI: forms, file_uploader, bar_chart, dataframe, download_button
+- try/except for optional libraries, image handling with Pillow, PDF with fpdf2
 """
 
 import csv
+import io
 import os
+import urllib.parse
 from datetime import datetime
 import streamlit as st
 import pandas as pd
 
 CSV_FILE = "inventory.csv"
 SALES_FILE = "sales.csv"
+PO_FILE = "purchase_orders.csv"
+PHOTOS_DIR = "photos"
+WHATSAPP_NUMBER = "923275084710"
 
 CATEGORIES = [
     "Jackets", "Hoodie", "Sweaters", "Sweat Shirts",
@@ -37,45 +43,90 @@ CATEGORIES = [
     "Ladies", "Shawls", "Co-ord Sets", "Kurtis", "Other"
 ]
 
-# ---------- Demo data (8 products, as agreed) ----------
+# ---------- Demo data (8 products, prices unchanged from v2) ----------
 DEMO_PRODUCTS = [
-    {"sku": "IAT-00001", "name": "Midnight Puffer Jacket", "category": "Jackets", "size": "L", "cost": 5200.0, "price": 8999.0, "qty": 12, "low_stock": 5},
-    {"sku": "IAT-00002", "name": "Olive Hoodie", "category": "Hoodie", "size": "M", "cost": 1800.0, "price": 2999.0, "qty": 20, "low_stock": 5},
-    {"sku": "IAT-00003", "name": "Camel Wool Sweater", "category": "Sweaters", "size": "L", "cost": 2200.0, "price": 3999.0, "qty": 5, "low_stock": 5},
-    {"sku": "IAT-00004", "name": "Navy Mock Neck Sweatshirt", "category": "Sweat Shirts", "size": "M", "cost": 1500.0, "price": 2699.0, "qty": 15, "low_stock": 5},
-    {"sku": "IAT-00005", "name": "White Formal Shirt", "category": "Shirts", "size": "L", "cost": 1200.0, "price": 2199.0, "qty": 18, "low_stock": 5},
-    {"sku": "IAT-00006", "name": "Black Straight Fit Jeans", "category": "Jeans", "size": "32", "cost": 2000.0, "price": 3499.0, "qty": 10, "low_stock": 5},
-    {"sku": "IAT-00007", "name": "Maroon Shawl", "category": "Shawls", "size": "One Size", "cost": 1400.0, "price": 2499.0, "qty": 3, "low_stock": 5},
-    {"sku": "IAT-00008", "name": "Grey Kurti", "category": "Kurtis", "size": "M", "cost": 1600.0, "price": 2799.0, "qty": 7, "low_stock": 5},
+    {"sku": "IAT-00001", "name": "Midnight Puffer Jacket", "category": "Jackets", "size": "L", "cost": 5200.0, "price": 8999.0, "qty": 12, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00002", "name": "Olive Hoodie", "category": "Hoodie", "size": "M", "cost": 1800.0, "price": 2999.0, "qty": 20, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00003", "name": "Camel Wool Sweater", "category": "Sweaters", "size": "L", "cost": 2200.0, "price": 3999.0, "qty": 5, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00004", "name": "Navy Mock Neck Sweatshirt", "category": "Sweat Shirts", "size": "M", "cost": 1500.0, "price": 2699.0, "qty": 15, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00005", "name": "White Formal Shirt", "category": "Shirts", "size": "L", "cost": 1200.0, "price": 2199.0, "qty": 18, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00006", "name": "Black Straight Fit Jeans", "category": "Jeans", "size": "32", "cost": 2000.0, "price": 3499.0, "qty": 10, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00007", "name": "Maroon Shawl", "category": "Shawls", "size": "One Size", "cost": 1400.0, "price": 2499.0, "qty": 3, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
+    {"sku": "IAT-00008", "name": "Grey Kurti", "category": "Kurtis", "size": "M", "cost": 1600.0, "price": 2799.0, "qty": 7, "low_stock": 5, "photo": "", "supplier": "", "sale_price": 0.0},
 ]
 DEMO_SKUS = {p["sku"] for p in DEMO_PRODUCTS}
+
+
+# ---------- Small helpers for safe number/text conversion ----------
+
+def _to_float(value, default=0.0):
+    try:
+        if value is None or str(value).strip() == "" or str(value).lower() == "nan":
+            return default
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_int(value, default=0):
+    try:
+        if value is None or str(value).strip() == "" or str(value).lower() == "nan":
+            return default
+        return int(float(value))
+    except (ValueError, TypeError):
+        return default
+
+
+def _to_text(value, default=""):
+    if value is None or str(value).lower() == "nan":
+        return default
+    return str(value)
 
 
 # ---------- Data functions (pure Python - core logic) ----------
 
 def load_products():
-    """Load products from CSV file. Returns a list of dicts."""
+    """Load products from CSV. Backward compatible: old CSVs without
+    photo / supplier / sale_price get defaults."""
     if not os.path.exists(CSV_FILE):
         return []
     products = []
     with open(CSV_FILE, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            row["cost"] = float(row["cost"])
-            row["price"] = float(row["price"])
-            row["qty"] = int(row["qty"])
-            row["low_stock"] = int(row["low_stock"])
-            products.append(row)
+            products.append({
+                "sku": _to_text(row.get("sku")),
+                "name": _to_text(row.get("name")),
+                "category": _to_text(row.get("category"), "Other"),
+                "size": _to_text(row.get("size")),
+                "cost": _to_float(row.get("cost")),
+                "price": _to_float(row.get("price")),
+                "qty": _to_int(row.get("qty")),
+                "low_stock": _to_int(row.get("low_stock"), 5),
+                "photo": _to_text(row.get("photo")),
+                "supplier": _to_text(row.get("supplier")),
+                "sale_price": _to_float(row.get("sale_price")),
+            })
     return products
 
 
 def save_products(products):
-    fieldnames = ["sku", "name", "category", "size", "cost", "price", "qty", "low_stock"]
+    fieldnames = ["sku", "name", "category", "size", "cost", "price",
+                  "qty", "low_stock", "photo", "supplier", "sale_price"]
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for p in products:
-            writer.writerow(p)
+            writer.writerow({
+                "sku": p.get("sku", ""), "name": p.get("name", ""),
+                "category": p.get("category", "Other"),
+                "size": p.get("size", ""), "cost": p.get("cost", 0),
+                "price": p.get("price", 0), "qty": p.get("qty", 0),
+                "low_stock": p.get("low_stock", 5),
+                "photo": p.get("photo", ""),
+                "supplier": p.get("supplier", ""),
+                "sale_price": p.get("sale_price", 0),
+            })
 
 
 def load_sales():
@@ -84,10 +135,14 @@ def load_sales():
     sales = []
     with open(SALES_FILE, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            row["qty"] = int(row["qty"])
-            row["amount"] = float(row["amount"])
-            row["profit"] = float(row["profit"])
-            sales.append(row)
+            sales.append({
+                "date": _to_text(row.get("date")),
+                "sku": _to_text(row.get("sku")),
+                "name": _to_text(row.get("name")),
+                "qty": _to_int(row.get("qty")),
+                "amount": _to_float(row.get("amount")),
+                "profit": _to_float(row.get("profit")),
+            })
     return sales
 
 
@@ -104,55 +159,231 @@ def save_sale(sku, name, qty, amount, profit):
         })
 
 
+def load_purchase_orders():
+    if not os.path.exists(PO_FILE):
+        return []
+    pos = []
+    with open(PO_FILE, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            pos.append({
+                "po_id": _to_text(row.get("po_id")),
+                "date": _to_text(row.get("date")),
+                "supplier": _to_text(row.get("supplier")),
+                "sku": _to_text(row.get("sku")),
+                "name": _to_text(row.get("name")),
+                "qty": _to_int(row.get("qty")),
+                "cost_each": _to_float(row.get("cost_each")),
+                "total_cost": _to_float(row.get("total_cost")),
+                "status": _to_text(row.get("status"), "Ordered"),
+            })
+    return pos
+
+
+def save_purchase_orders(pos):
+    fieldnames = ["po_id", "date", "supplier", "sku", "name",
+                  "qty", "cost_each", "total_cost", "status"]
+    with open(PO_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for po in pos:
+            writer.writerow(po)
+
+
+def make_po_id(pos):
+    nums = []
+    for po in pos:
+        try:
+            nums.append(int(str(po["po_id"]).replace("PO-", "")))
+        except ValueError:
+            pass
+    return f"PO-{max(nums, default=0) + 1:03d}"
+
+
 def make_sku(products):
     # Next number after the highest existing IAT- number
     nums = [int(p["sku"].split("-")[1]) for p in products
-            if p["sku"].startswith("IAT-") and p["sku"].split("-")[1].isdigit()]
+            if p["sku"].startswith("IAT-") and len(p["sku"].split("-")) > 1
+            and p["sku"].split("-")[1].isdigit()]
     return f"IAT-{max(nums, default=0) + 1:05d}"
 
 
+def effective_price(product):
+    """Sale price if one is set, otherwise the normal price."""
+    sale = _to_float(product.get("sale_price"), 0)
+    if sale > 0:
+        return sale
+    return _to_float(product.get("price"), 0)
+
+
+def discount_percent(product):
+    price = _to_float(product.get("price"), 0)
+    sale = _to_float(product.get("sale_price"), 0)
+    if sale > 0 and price > 0 and sale < price:
+        return (price - sale) / price * 100
+    return 0.0
+
+
+def discount_label(product):
+    pct = discount_percent(product)
+    if pct > 0:
+        return f"{pct:.0f}% OFF"
+    return "-"
+
+
 def profit_per_item(product):
-    return product["price"] - product["cost"]
+    return effective_price(product) - _to_float(product.get("cost"), 0)
 
 
 def margin_percent(product):
-    if product["cost"] == 0:
+    cost = _to_float(product.get("cost"), 0)
+    if cost == 0:
         return 0
-    return (product["price"] - product["cost"]) / product["cost"] * 100
+    return profit_per_item(product) / cost * 100
 
 
 def is_low_stock(product):
-    return product["qty"] <= product["low_stock"]
+    return _to_int(product.get("qty"), 0) <= _to_int(product.get("low_stock"), 5)
 
 
 def restock_suggestion(product, target=15):
     """How many to order to bring stock up to target (15)."""
-    return max(0, target - product["qty"])
+    return max(0, target - _to_int(product.get("qty"), 0))
+
+
+def save_uploaded_photo(uploaded_file, sku):
+    """Save an uploaded photo to photos/<SKU>.<ext> and return the filename.
+    Returns "" if no file was uploaded."""
+    if uploaded_file is None:
+        return ""
+    os.makedirs(PHOTOS_DIR, exist_ok=True)
+    ext = os.path.splitext(uploaded_file.name)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png"):
+        ext = ".jpg"
+    if ext == ".jpeg":
+        ext = ".jpg"
+    filename = f"{sku}{ext}"
+    path = os.path.join(PHOTOS_DIR, filename)
+    with open(path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return filename
+
+
+def whatsapp_order_link(product):
+    """Build a wa.me link with product details prefilled."""
+    message = (
+        f"Hello Ibrahim Apparel & Trading, I want to order "
+        f"{product.get('name', '')} (SKU {product.get('sku', '')}), "
+        f"Size {product.get('size', '')}, "
+        f"Price Rs {effective_price(product):,.0f}. "
+        f"Please confirm availability."
+    )
+    return f"https://wa.me/{WHATSAPP_NUMBER}?text={urllib.parse.quote(message)}"
+
+
+def make_barcode_png(sku):
+    """Return CODE128 barcode image bytes for a SKU.
+    Raises ImportError if python-barcode / Pillow is missing."""
+    from barcode import Code128
+    from barcode.writer import ImageWriter
+    buffer = io.BytesIO()
+    Code128(sku, writer=ImageWriter()).write(
+        buffer,
+        options={"module_width": 0.35, "module_height": 15,
+                 "font_size": 10, "text_distance": 5, "quiet_zone": 2},
+    )
+    return buffer.getvalue()
+
+
+def make_price_tag_png(product):
+    """Return a price-tag PNG (name, price, SKU, barcode) as bytes.
+    Raises ImportError if python-barcode / Pillow is missing."""
+    from PIL import Image, ImageDraw
+    barcode_bytes = make_barcode_png(product.get("sku", ""))
+    barcode_img = Image.open(io.BytesIO(barcode_bytes)).convert("RGB")
+    tag = Image.new("RGB", (600, 460), "white")
+    draw = ImageDraw.Draw(tag)
+    draw.text((30, 20), "IBRAHIM APPAREL & TRADING", fill="black")
+    draw.text((30, 60), str(product.get("name", "")), fill="black")
+    draw.text((30, 100), f"Size: {product.get('size', '')}    SKU: {product.get('sku', '')}", fill="black")
+    if discount_percent(product) > 0:
+        draw.text((30, 135), f"Price: Rs {effective_price(product):,.0f}  (was Rs {_to_float(product.get('price'), 0):,.0f}, {discount_label(product)})", fill="black")
+    else:
+        draw.text((30, 135), f"Price: Rs {effective_price(product):,.0f}", fill="black")
+    barcode_img.thumbnail((540, 220))
+    tag.paste(barcode_img, (30, 180))
+    draw.text((30, 420), "Scan to order on WhatsApp: 0327-5084710", fill="black")
+    out = io.BytesIO()
+    tag.save(out, format="PNG")
+    return out.getvalue()
+
+
+def build_monthly_report_pdf(month_label, total_amount, total_profit,
+                             sale_count, best_by_qty, best_by_profit):
+    """Return a simple monthly report PDF as bytes.
+    Raises ImportError if fpdf2 is not installed."""
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Ibrahim Apparel & Trading", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(0, 10, f"Monthly Sales Report - {month_label}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, "Totals", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(0, 8, f"Number of sales: {sale_count}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, f"Total sales amount: Rs {total_amount:,.0f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, f"Total profit: Rs {total_profit:,.0f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, "Best Sellers by Quantity", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 12)
+    if best_by_qty:
+        for name, qty in best_by_qty:
+            pdf.cell(0, 8, f"{name}: {qty} sold", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.cell(0, 8, "No sales this month.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 10, "Best Sellers by Profit", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 12)
+    if best_by_profit:
+        for name, profit in best_by_profit:
+            pdf.cell(0, 8, f"{name}: Rs {profit:,.0f} profit", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.cell(0, 8, "No sales this month.", new_x="LMARGIN", new_y="NEXT")
+    output = pdf.output()
+    return bytes(output) if isinstance(output, (bytearray, bytes)) else output.encode("latin-1")
 
 
 # ---------- App state ----------
 
-st.set_page_config(page_title="Ibrahim Inventory Manager", page_icon="🧥", layout="wide")
+st.set_page_config(page_title="Ibrahim Inventory Manager", page_icon=None, layout="wide")
 
 if "products" not in st.session_state:
     st.session_state.products = load_products()
 if "sales" not in st.session_state:
     st.session_state.sales = load_sales()
+if "purchase_orders" not in st.session_state:
+    st.session_state.purchase_orders = load_purchase_orders()
 
 products = st.session_state.products
 sales = st.session_state.sales
+purchase_orders = st.session_state.purchase_orders
 
 # ---------- Header ----------
 
-st.title("🧥 Ibrahim Apparel & Trading")
+st.title("Ibrahim Apparel & Trading")
 st.subheader("Inventory Manager — Full Python Project")
-st.write("Add products, track stock, see profit. Data saves to `inventory.csv`.")
+st.write("Add products, track stock, see profit. Data saves to inventory.csv.")
 
 # ---------- Demo data buttons ----------
 
 col_d1, col_d2, col_d3 = st.columns(3)
 with col_d1:
-    if st.button("📥 Load Demo Data (8 products)"):
+    if st.button("Load Demo Data (8 products)"):
         existing_skus = {p["sku"] for p in products}
         added = 0
         for demo in DEMO_PRODUCTS:
@@ -163,7 +394,7 @@ with col_d1:
         st.success(f"Demo data loaded — {added} new product(s) added.")
         st.rerun()
 with col_d2:
-    if st.button("🧹 Clear Demo Data"):
+    if st.button("Clear Demo Data"):
         products[:] = [p for p in products if p["sku"] not in DEMO_SKUS]
         save_products(products)
         st.success("Demo products removed. Your own products are kept.")
@@ -171,11 +402,11 @@ with col_d2:
 with col_d3:
     st.write("Demo = 8 products: Puffer Jacket, Hoodie, Sweater, Sweatshirt, Shirt, Jeans, Shawl, Kurti.")
 
-# ---------- Dashboard ----------
+# ---------- Dashboard (uses effective price everywhere) ----------
 
-total_units = sum(p["qty"] for p in products)
-stock_cost_value = sum(p["cost"] * p["qty"] for p in products)
-stock_price_value = sum(p["price"] * p["qty"] for p in products)
+total_units = sum(_to_int(p.get("qty")) for p in products)
+stock_cost_value = sum(_to_float(p.get("cost")) * _to_int(p.get("qty")) for p in products)
+stock_price_value = sum(effective_price(p) * _to_int(p.get("qty")) for p in products)
 total_profit = stock_price_value - stock_cost_value
 low_items = [p for p in products if is_low_stock(p)]
 sales_total = sum(s["amount"] for s in sales)
@@ -189,20 +420,20 @@ c4.metric("Potential Profit (Rs)", f"{total_profit:,.0f}")
 c5.metric("Sales So Far (Rs)", f"{sales_total:,.0f}", f"Profit Rs {sales_profit:,.0f}")
 
 if low_items:
-    st.warning(f"⚠️ Low stock: {len(low_items)} item(s) — " +
+    st.warning(f"Low stock: {len(low_items)} item(s) — " +
                ", ".join(f"{p['name']} ({p['qty']} left)" for p in low_items))
 
 st.divider()
 
-# ---------- Charts: by category ----------
+# ---------- Charts: by category (effective price) ----------
 
-st.header("📊 Insights — By Category")
+st.header("Insights — By Category")
 if products:
     df_all = pd.DataFrame([{
         "Category": p["category"],
-        "Stock Value (Rs)": p["price"] * p["qty"],
-        "Profit (Rs)": profit_per_item(p) * p["qty"],
-        "Units": p["qty"],
+        "Stock Value (Rs)": effective_price(p) * _to_int(p.get("qty")),
+        "Profit (Rs)": profit_per_item(p) * _to_int(p.get("qty")),
+        "Units": _to_int(p.get("qty")),
     } for p in products])
     grouped = df_all.groupby("Category").sum(numeric_only=True)
     cc1, cc2 = st.columns(2)
@@ -220,7 +451,7 @@ st.divider()
 
 # ---------- Low-stock dashboard ----------
 
-st.header("🔴 Low Stock — What to Order")
+st.header("Low Stock — What to Order")
 if not low_items:
     st.success("All good — no low-stock items right now.")
 else:
@@ -228,15 +459,15 @@ else:
         "SKU": p["sku"], "Name": p["name"], "Category": p["category"],
         "In Stock": p["qty"], "Alert At": p["low_stock"],
         "Order This Many (to reach 15)": restock_suggestion(p),
-        "Cost to Restock (Rs)": restock_suggestion(p) * p["cost"],
+        "Cost to Restock (Rs)": restock_suggestion(p) * _to_float(p.get("cost")),
     } for p in low_items]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 st.divider()
 
-# ---------- Add Product Form ----------
+# ---------- Add Product Form (now with photo, supplier, sale price) ----------
 
-st.header("➕ Add New Product")
+st.header("Add New Product")
 with st.form("add_product"):
     c1, c2, c3 = st.columns(3)
     name = c1.text_input("Product Name *", placeholder="e.g. Midnight Puffer Jacket")
@@ -247,7 +478,11 @@ with st.form("add_product"):
     price = c5.number_input("Selling Price (Rs)", min_value=0.0, step=100.0)
     qty = c6.number_input("Quantity", min_value=0, step=1)
     low_stock = c7.number_input("Low Stock Alert At", min_value=0, value=5, step=1)
+    c8, c9 = st.columns(2)
+    supplier = c8.text_input("Supplier", placeholder="e.g. Faisalabad Textiles")
+    sale_price = c9.number_input("Sale Price (Rs, 0 = no sale)", min_value=0.0, step=100.0)
     sku_input = st.text_input("SKU (leave blank for auto)", placeholder="IAT-00001")
+    photo_file = st.file_uploader("Product Photo (jpg/png)", type=["jpg", "jpeg", "png"])
 
     submitted = st.form_submit_button("Add Product")
     if submitted:
@@ -255,12 +490,19 @@ with st.form("add_product"):
             st.error("Product name is required.")
         elif price < cost:
             st.error("Selling price should be more than cost, otherwise loss!")
+        elif sale_price > 0 and sale_price < cost:
+            st.error("Sale price should not be below cost.")
+        elif sale_price > 0 and sale_price >= price:
+            st.error("Sale price should be less than the normal price.")
         else:
             sku = sku_input.strip() or make_sku(products)
+            photo_name = save_uploaded_photo(photo_file, sku) if photo_file else ""
             new_product = {
                 "sku": sku, "name": name, "category": category,
                 "size": size, "cost": cost, "price": price,
                 "qty": int(qty), "low_stock": int(low_stock),
+                "photo": photo_name, "supplier": supplier,
+                "sale_price": float(sale_price),
             }
             products.append(new_product)
             save_products(products)
@@ -270,12 +512,12 @@ with st.form("add_product"):
 
 st.divider()
 
-# ---------- CSV Import ----------
+# ---------- CSV Import (new fields supported) ----------
 
-st.header("📤 Import Products from CSV")
-st.write("Upload a CSV with columns: `sku,name,category,size,cost,price,qty,low_stock` — blank SKU = auto.")
-st.download_button("⬇️ Download CSV Template",
-                   data="sku,name,category,size,cost,price,qty,low_stock\n,Test Jacket,Jackets,L,5000,8999,10,5\n",
+st.header("Import Products from CSV")
+st.write("Upload a CSV with columns: sku,name,category,size,cost,price,qty,low_stock,photo,supplier,sale_price — blank SKU = auto. Only name, category, cost, price, qty are required.")
+st.download_button("Download CSV Template",
+                   data="sku,name,category,size,cost,price,qty,low_stock,photo,supplier,sale_price\n,Test Jacket,Jackets,L,5000,8999,10,5,,Faisalabad Textiles,0\n",
                    file_name="inventory_template.csv", mime="text/csv")
 uploaded = st.file_uploader("Choose a CSV file", type=["csv"])
 if uploaded is not None:
@@ -287,18 +529,21 @@ if uploaded is not None:
         else:
             added = 0
             for _, row in df_up.iterrows():
-                sku = str(row.get("sku", "")).strip()
+                sku = _to_text(row.get("sku")).strip()
                 if not sku or sku.lower() == "nan":
                     sku = make_sku(products)
                 products.append({
                     "sku": sku,
-                    "name": str(row["name"]),
-                    "category": str(row.get("category", "Other")),
-                    "size": str(row.get("size", "")),
-                    "cost": float(row["cost"]),
-                    "price": float(row["price"]),
-                    "qty": int(row["qty"]),
-                    "low_stock": int(row.get("low_stock", 5)),
+                    "name": _to_text(row.get("name")),
+                    "category": _to_text(row.get("category"), "Other"),
+                    "size": _to_text(row.get("size")),
+                    "cost": _to_float(row.get("cost")),
+                    "price": _to_float(row.get("price")),
+                    "qty": _to_int(row.get("qty")),
+                    "low_stock": _to_int(row.get("low_stock"), 5),
+                    "photo": _to_text(row.get("photo")),
+                    "supplier": _to_text(row.get("supplier")),
+                    "sale_price": _to_float(row.get("sale_price")),
                 })
                 added += 1
             save_products(products)
@@ -309,11 +554,11 @@ if uploaded is not None:
 
 st.divider()
 
-# ---------- Search / Filter / List ----------
+# ---------- Search / Filter / List (with Discount column) ----------
 
-st.header("📦 Inventory")
+st.header("Inventory")
 
-search = st.text_input("🔍 Search by name or SKU", "")
+search = st.text_input("Search by name or SKU", "")
 filter_cat = st.selectbox("Filter by Category", ["All"] + CATEGORIES)
 show_only_low = st.checkbox("Show low stock only")
 
@@ -334,21 +579,83 @@ else:
         rows.append({
             "SKU": p["sku"], "Name": p["name"], "Category": p["category"],
             "Size": p["size"], "Cost (Rs)": p["cost"], "Price (Rs)": p["price"],
+            "Sale Price (Rs)": _to_float(p.get("sale_price"), 0) or "-",
+            "Effective Price (Rs)": effective_price(p),
+            "Discount": discount_label(p),
             "Profit / item": profit_per_item(p), "Qty": p["qty"],
-            "Stock Value": p["price"] * p["qty"],
-            "Status": "🔴 LOW" if is_low_stock(p) else "🟢 OK",
+            "Stock Value": effective_price(p) * _to_int(p.get("qty")),
+            "Supplier": p.get("supplier", ""),
+            "Status": "LOW" if is_low_stock(p) else "OK",
         })
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
-    st.download_button("⬇️ Download Inventory as CSV",
+    st.download_button("Download Inventory as CSV",
                        data=df.to_csv(index=False).encode("utf-8"),
                        file_name="ibrahim_inventory.csv", mime="text/csv")
 
 st.divider()
 
-# ---------- Edit Product ----------
+# ---------- Product Detail: photo, barcode, price tag, WhatsApp ----------
 
-st.header("✏️ Edit Product")
+st.header("Product Detail")
+if not products:
+    st.write("Add a product first.")
+else:
+    detail_names = [f"{p['sku']} — {p['name']}" for p in products]
+    detail_sel = st.selectbox("Select product to view", detail_names, key="detail_sel")
+    detail_idx = detail_names.index(detail_sel)
+    dp = products[detail_idx]
+
+    d1, d2 = st.columns(2)
+    with d1:
+        st.subheader(dp["name"])
+        st.write(f"SKU: {dp['sku']} | Category: {dp['category']} | Size: {dp['size']}")
+        st.write(f"Supplier: {dp.get('supplier', '') or '-'}")
+        st.write(f"Cost: Rs {_to_float(dp.get('cost'), 0):,.0f}")
+        if discount_percent(dp) > 0:
+            st.write(f"Price: Rs {_to_float(dp.get('price'), 0):,.0f}  |  Sale Price: Rs {effective_price(dp):,.0f}  ({discount_label(dp)})")
+        else:
+            st.write(f"Price: Rs {effective_price(dp):,.0f}")
+        st.write(f"Profit per item: Rs {profit_per_item(dp):,.0f} ({margin_percent(dp):.1f}% margin)")
+        st.write(f"In stock: {dp['qty']}  |  Status: {'LOW' if is_low_stock(dp) else 'OK'}")
+        # WhatsApp Order button
+        try:
+            st.link_button("Order on WhatsApp", whatsapp_order_link(dp))
+        except Exception:
+            st.markdown(f"[Order on WhatsApp]({whatsapp_order_link(dp)})")
+        st.write("WhatsApp: 0327-5084710 — message is prefilled with name, price, size and SKU.")
+    with d2:
+        photo_name = dp.get("photo", "")
+        photo_path = os.path.join(PHOTOS_DIR, photo_name) if photo_name else ""
+        if photo_name and os.path.exists(photo_path):
+            st.image(photo_path, caption=dp["name"], use_container_width=True)
+        else:
+            st.info("No product photo yet. Add one in Edit Product.")
+
+    # Barcode + Price Tag
+    st.subheader("Barcode and Price Tag")
+    try:
+        barcode_bytes = make_barcode_png(dp["sku"])
+        st.image(barcode_bytes, caption=f"CODE128 — {dp['sku']}", width=320)
+        try:
+            tag_bytes = make_price_tag_png(dp)
+            st.download_button("Download Price Tag (PNG)",
+                               data=tag_bytes,
+                               file_name=f"{dp['sku']}_price_tag.png",
+                               mime="image/png")
+        except Exception as e:
+            st.error(f"Could not make the price tag: {e}")
+    except ImportError:
+        st.info("Barcode is not available: install python-barcode and pillow "
+                "(they are in requirements.txt) and redeploy to see it.")
+    except Exception as e:
+        st.error(f"Could not make the barcode: {e}")
+
+st.divider()
+
+# ---------- Edit Product (photo, supplier, sale price) ----------
+
+st.header("Edit Product")
 if not products:
     st.write("Add a product first.")
 else:
@@ -366,22 +673,35 @@ else:
         e_price = e5.number_input("Price (Rs)", min_value=0.0, value=float(ep["price"]), step=100.0)
         e_qty = e6.number_input("Quantity", min_value=0, value=int(ep["qty"]), step=1)
         e_low = e7.number_input("Low Stock Alert At", min_value=0, value=int(ep["low_stock"]), step=1)
+        e8, e9 = st.columns(2)
+        e_supplier = e8.text_input("Supplier", value=ep.get("supplier", ""))
+        e_sale = e9.number_input("Sale Price (Rs, 0 = no sale)", min_value=0.0, value=float(ep.get("sale_price", 0)), step=100.0)
+        e_photo = st.file_uploader("New Product Photo (jpg/png, leave empty to keep current)", type=["jpg", "jpeg", "png"])
         if st.form_submit_button("Save Changes"):
             if e_price < e_cost:
                 st.error("Price should be more than cost.")
+            elif e_sale > 0 and e_sale < e_cost:
+                st.error("Sale price should not be below cost.")
+            elif e_sale > 0 and e_sale >= e_price:
+                st.error("Sale price should be less than the normal price.")
             else:
+                photo_name = ep.get("photo", "")
+                if e_photo is not None:
+                    photo_name = save_uploaded_photo(e_photo, ep["sku"])
                 ep.update({"name": e_name, "category": e_cat, "size": e_size,
                            "cost": e_cost, "price": e_price,
-                           "qty": int(e_qty), "low_stock": int(e_low)})
+                           "qty": int(e_qty), "low_stock": int(e_low),
+                           "supplier": e_supplier, "sale_price": float(e_sale),
+                           "photo": photo_name})
                 save_products(products)
                 st.success(f"Updated {e_name}.")
                 st.rerun()
 
 st.divider()
 
-# ---------- Sell / Restock (now logs sales) ----------
+# ---------- Sell / Restock (sells at effective price) ----------
 
-st.header("🛒 Sell / Restock")
+st.header("Sell / Restock")
 if not products:
     st.write("Add a product first.")
 else:
@@ -390,8 +710,10 @@ else:
     idx = names.index(selected)
     product = products[idx]
 
-    st.write(f"**{product['name']}** — Price Rs {product['price']:,.0f}, "
+    st.write(f"**{product['name']}** — Price Rs {effective_price(product):,.0f}, "
              f"Profit Rs {profit_per_item(product):,.0f} per item, Stock: {product['qty']}")
+    if discount_percent(product) > 0:
+        st.write(f"On sale: was Rs {_to_float(product.get('price'), 0):,.0f}, now Rs {effective_price(product):,.0f} ({discount_label(product)})")
 
     c1, c2 = st.columns(2)
     sell_qty = c1.number_input("Sell Quantity", min_value=1, max_value=max(1, product["qty"]), step=1)
@@ -401,7 +723,7 @@ else:
         else:
             product["qty"] -= sell_qty
             save_products(products)
-            amount = sell_qty * product["price"]
+            amount = sell_qty * effective_price(product)
             profit = sell_qty * profit_per_item(product)
             save_sale(product["sku"], product["name"], int(sell_qty), amount, profit)
             st.session_state.sales = load_sales()
@@ -415,7 +737,7 @@ else:
         st.success(f"Added {add_qty} to {product['name']}. New stock: {product['qty']}")
         st.rerun()
 
-    if st.button("🗑️ Delete This Product"):
+    if st.button("Delete This Product"):
         products.pop(idx)
         save_products(products)
         st.success("Product deleted.")
@@ -423,9 +745,67 @@ else:
 
 st.divider()
 
+# ---------- Supplier & Purchase Orders ----------
+
+st.header("Supplier & Purchase Orders")
+if not products:
+    st.write("Add a product first, then create a purchase order for it.")
+else:
+    with st.form("create_po"):
+        po_names = [f"{p['sku']} — {p['name']}" for p in products]
+        po_sel = st.selectbox("Product", po_names)
+        po_idx = po_names.index(po_sel)
+        po_product = products[po_idx]
+        po_supplier = st.text_input("Supplier", value=po_product.get("supplier", ""))
+        po_c1, po_c2 = st.columns(2)
+        po_qty = po_c1.number_input("Quantity to Order", min_value=1, value=10, step=1)
+        po_cost = po_c2.number_input("Cost per Unit (Rs)", min_value=0.0, value=float(po_product.get("cost", 0)), step=100.0)
+        if st.form_submit_button("Create Purchase Order"):
+            if not po_supplier:
+                st.error("Supplier name is required for a purchase order.")
+            else:
+                new_po = {
+                    "po_id": make_po_id(purchase_orders),
+                    "date": datetime.now().strftime("%Y-%m-%d"),
+                    "supplier": po_supplier,
+                    "sku": po_product["sku"],
+                    "name": po_product["name"],
+                    "qty": int(po_qty),
+                    "cost_each": float(po_cost),
+                    "total_cost": float(po_qty) * float(po_cost),
+                    "status": "Ordered",
+                }
+                purchase_orders.append(new_po)
+                save_purchase_orders(purchase_orders)
+                st.success(f"Created {new_po['po_id']} — {po_qty} x {po_product['name']} from {po_supplier}, total Rs {new_po['total_cost']:,.0f}")
+                st.rerun()
+
+    if not purchase_orders:
+        st.info("No purchase orders yet.")
+    else:
+        st.dataframe(pd.DataFrame(purchase_orders), use_container_width=True, hide_index=True)
+        ordered = [po for po in purchase_orders if po.get("status") == "Ordered"]
+        if ordered:
+            po_labels = [f"{po['po_id']} — {po['name']} x {po['qty']} from {po['supplier']}" for po in ordered]
+            po_choice = st.selectbox("Mark a purchase order as received", po_labels)
+            if st.button("Mark Received"):
+                chosen = ordered[po_labels.index(po_choice)]
+                match = [p for p in products if p["sku"] == chosen["sku"]]
+                if not match:
+                    st.error("That product no longer exists in inventory, so stock cannot be added.")
+                else:
+                    match[0]["qty"] = _to_int(match[0].get("qty")) + _to_int(chosen.get("qty"))
+                    chosen["status"] = "Received"
+                    save_products(products)
+                    save_purchase_orders(purchase_orders)
+                    st.success(f"Received {chosen['po_id']}: added {chosen['qty']} to {chosen['name']}. New stock: {match[0]['qty']}")
+                    st.rerun()
+
+st.divider()
+
 # ---------- Sales History ----------
 
-st.header("🧾 Sales History")
+st.header("Sales History")
 sales = st.session_state.sales
 if not sales:
     st.info("No sales yet. Sell something above and it will appear here with date, amount and profit.")
@@ -434,9 +814,51 @@ else:
     st.dataframe(df_sales, use_container_width=True, hide_index=True)
     st.write(f"**Total sales:** Rs {sum(s['amount'] for s in sales):,.0f} &nbsp;|&nbsp; "
              f"**Total profit from sales:** Rs {sum(s['profit'] for s in sales):,.0f}")
-    st.download_button("⬇️ Download Sales as CSV",
+    st.download_button("Download Sales as CSV",
                        data=df_sales.to_csv(index=False).encode("utf-8"),
                        file_name="ibrahim_sales.csv", mime="text/csv")
+
+st.divider()
+
+# ---------- Monthly Report + PDF ----------
+
+st.header("Monthly Report")
+current_month = datetime.now().strftime("%Y-%m")
+month_sales = [s for s in sales if str(s.get("date", ""))[:7] == current_month]
+month_total = sum(s["amount"] for s in month_sales)
+month_profit = sum(s["profit"] for s in month_sales)
+month_count = len(month_sales)
+
+m1, m2, m3 = st.columns(3)
+m1.metric("Sales This Month (Rs)", f"{month_total:,.0f}")
+m2.metric("Profit This Month (Rs)", f"{month_profit:,.0f}")
+m3.metric("Number of Sales", month_count)
+
+best_by_qty = []
+best_by_profit = []
+if month_sales:
+    df_month = pd.DataFrame(month_sales)
+    by_name = df_month.groupby("name").agg({"qty": "sum", "amount": "sum", "profit": "sum"}).reset_index()
+    st.write("Best sellers this month:")
+    st.dataframe(by_name.sort_values("qty", ascending=False), use_container_width=True, hide_index=True)
+    best_by_qty = [(row["name"], int(row["qty"])) for _, row in by_name.sort_values("qty", ascending=False).head(5).iterrows()]
+    best_by_profit = [(row["name"], float(row["profit"])) for _, row in by_name.sort_values("profit", ascending=False).head(5).iterrows()]
+else:
+    st.info(f"No sales in {current_month} yet. Sell something and it will appear here.")
+
+if st.button("Generate Monthly Report PDF"):
+    try:
+        pdf_bytes = build_monthly_report_pdf(
+            current_month, month_total, month_profit, month_count,
+            best_by_qty, best_by_profit)
+        st.download_button("Download Monthly Report (PDF)",
+                           data=pdf_bytes,
+                           file_name=f"ibrahim_monthly_report_{current_month}.pdf",
+                           mime="application/pdf")
+    except ImportError:
+        st.info("PDF is not available: install fpdf2 (it is in requirements.txt) and redeploy to generate the PDF.")
+    except Exception as e:
+        st.error(f"Could not make the PDF: {e}")
 
 st.divider()
 st.caption("Practice task: add a filter to Sales History by date, or a chart of sales profit per day. "
