@@ -1,2 +1,5 @@
 streamlit
 pandas
+python-barcode
+pillow
+fpdf2
